@@ -455,20 +455,59 @@ pub fn render_editor_page(rel_path: &str) -> String {
             border: 1px solid rgba(128,128,128,.4); background: transparent; color: inherit;
         }}
         #status {{ font-size: 12px; color: #656d76; }}
-        #editor {{ max-width: 980px; margin: 0 auto; padding: 16px; }}
         .cm-editor {{ border: 1px solid rgba(128,128,128,.3); border-radius: 6px; }}
         .cm-editor.cm-focused {{ outline: none; }}
+        /* Three-button view-switcher triad */
+        .view-btn {{
+            display: inline-flex; align-items: center; justify-content: center;
+            width: 28px; height: 28px; padding: 0;
+            border: 1px solid rgba(128,128,128,.3); border-radius: 6px;
+            background: transparent; color: #656d76; cursor: pointer;
+            transition: background-color .1s, color .1s, border-color .1s;
+        }}
+        .view-btn:hover {{ background-color: rgba(175,184,193,.2); border-color: rgba(175,184,193,.5); color: #1f2328; }}
+        .view-btn.active {{ background-color: rgba(175,184,193,.3); border-color: rgba(175,184,193,.6); color: #1f2328; }}
+        @media (prefers-color-scheme: dark) {{
+            .view-btn {{ color: #7d8590; }}
+            .view-btn:hover {{ background-color: rgba(99,110,123,.25); border-color: rgba(99,110,123,.5); color: #e6edf3; }}
+            .view-btn.active {{ background-color: rgba(99,110,123,.35); border-color: rgba(99,110,123,.6); color: #e6edf3; }}
+        }}
+        /* Layout panes */
+        #panes {{ display: flex; height: calc(100vh - 49px); overflow: hidden; }}
+        #editor-pane {{ flex: 1; overflow: auto; padding: 16px; box-sizing: border-box; }}
+        #preview-pane {{
+            flex: 1; overflow: auto; padding: 16px; box-sizing: border-box;
+            border-left: 1px solid rgba(128,128,128,.3);
+        }}
+        .markdown-body {{
+            box-sizing: border-box; min-width: 200px; max-width: 860px; margin: 0 auto;
+        }}
+        /* View modes: data-view on #panes controls visibility */
+        #panes[data-view="edit"] #preview-pane {{ display: none; }}
+        #panes[data-view="preview"] #editor-pane {{ display: none; }}
     </style>
 </head>
 <body>
     <div id="toolbar">
         <span class="path">{display_path}</span>
         <span class="spacer"></span>
+        <button class="view-btn active" id="btn-edit" type="button" title="Edit view" aria-label="Edit view" aria-pressed="true">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M227.31,73.37,182.63,28.69a16,16,0,0,0-22.63,0L36.69,152A15.86,15.86,0,0,0,32,163.31V208a16,16,0,0,0,16,16H92.69A15.86,15.86,0,0,0,104,219.31L227.31,96A16,16,0,0,0,227.31,73.37ZM51.31,160,136,75.31,152.69,92,68,176.69Zm-3.31,16H68v20H48Zm36,4L68,163.31,172.69,58.63,189.37,75.31Z"/></svg>
+        </button>
+        <button class="view-btn" id="btn-split" type="button" title="Split view" aria-label="Split view" aria-pressed="false">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M216,48H40A16,16,0,0,0,24,64V192a16,16,0,0,0,16,16H216a16,16,0,0,0,16-16V64A16,16,0,0,0,216,48Zm0,16V192H136V64Zm-96,128H40V64h80Z"/></svg>
+        </button>
+        <button class="view-btn" id="btn-preview" type="button" title="Read-only view" aria-label="Read-only view" aria-pressed="false">
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M247.31,124.76c-.35-.79-8.82-19.58-27.65-38.41C194.57,61.26,162.88,48,128,48S61.43,61.26,36.34,86.35C17.51,105.18,9,124,8.69,124.76a8,8,0,0,0,0,6.5c.35.79,8.82,19.57,27.65,38.4C61.43,194.74,93.12,208,128,208s66.57-13.26,91.66-38.34c18.83-18.83,27.3-37.61,27.65-38.4A8,8,0,0,0,247.31,124.76ZM128,192c-30.78,0-57.67-11.19-79.93-33.25A133.47,133.47,0,0,1,25,128,133.33,133.33,0,0,1,48.07,97.25C70.33,75.19,97.22,64,128,64s57.67,11.19,79.93,33.25A133.46,133.46,0,0,1,231.05,128C223.84,141.46,192.43,192,128,192Zm0-112a48,48,0,1,0,48,48A48.05,48.05,0,0,0,128,80Zm0,80a32,32,0,1,1,32-32A32,32,0,0,1,128,112Z"/></svg>
+        </button>
         <label for="username">name</label>
         <input id="username" type="text" maxlength="40" autocomplete="off">
         <span id="status">connecting…</span>
     </div>
-    <div id="editor"></div>
+    <div id="panes" data-view="split">
+        <div id="editor-pane"></div>
+        <div id="preview-pane"><div id="preview-doc" class="markdown-body"></div></div>
+    </div>
 
     <script type="module">
 import * as Y from 'yjs';
@@ -631,8 +670,69 @@ const state = EditorState.create({{
         EditorView.lineWrapping,
     ],
 }});
-const view = new EditorView({{ state, parent: document.getElementById('editor') }});
+const view = new EditorView({{ state, parent: document.getElementById('editor-pane') }});
 view.focus();
+
+// View-switcher triad
+const panesEl = document.getElementById('panes');
+const btns = {{
+    edit: document.getElementById('btn-edit'),
+    split: document.getElementById('btn-split'),
+    preview: document.getElementById('btn-preview'),
+}};
+
+function setView(mode) {{
+    panesEl.setAttribute('data-view', mode);
+    Object.entries(btns).forEach(([k, btn]) => {{
+        const active = k === mode;
+        btn.classList.toggle('active', active);
+        btn.setAttribute('aria-pressed', String(active));
+    }});
+    if (mode === 'split' || mode === 'preview') {{
+        refreshPreview();
+    }}
+    localStorage.setItem('editor-view', mode);
+}}
+
+// Restore persisted view mode on load.
+const savedView = localStorage.getItem('editor-view');
+if (savedView === 'edit' || savedView === 'split' || savedView === 'preview') {{
+    setView(savedView);
+}} else {{
+    setView('edit');
+}}
+
+btns.edit.addEventListener('click', () => setView('edit'));
+btns.split.addEventListener('click', () => setView('split'));
+btns.preview.addEventListener('click', () => setView('preview'));
+
+// Preview pane: fetch /content?path=<path> and display HTML in the preview-doc div.
+// Same-origin fetch with session cookie (SameSite=Strict cookie included automatically).
+const previewDocEl = document.getElementById('preview-doc');
+let previewFetching = false;
+async function refreshPreview() {{
+    if (previewFetching) return;
+    previewFetching = true;
+    try {{
+        const resp = await fetch('/content?path=' + encodeURIComponent(path), {{ credentials: 'same-origin' }});
+        if (resp.ok) {{
+            previewDocEl.innerHTML = await resp.text();
+        }}
+    }} catch (e) {{
+        console.error('[view-switcher] preview fetch error:', e);
+    }} finally {{
+        previewFetching = false;
+    }}
+}}
+
+// Refresh preview whenever the document changes (debounced 400ms).
+let previewTimer = null;
+ytext.observe(() => {{
+    if (panesEl.getAttribute('data-view') !== 'edit') {{
+        clearTimeout(previewTimer);
+        previewTimer = setTimeout(refreshPreview, 400);
+    }}
+}});
 
 // (5) Flush-on-exit (ADR-0002 gotcha): best-effort flush pending updates before
 // teardown. Yjs applies edits synchronously and our doc-update handler sends
